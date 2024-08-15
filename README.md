@@ -32,6 +32,10 @@ This project provides a custom PostgreSQL installation script and a Docker setup
 
 3. The PostgreSQL server will be available on `localhost:5433`
 
+## Installation
+
+For detailed installation instructions, please refer to the [Installation Guide](docs/installation.md).
+
 ## Custom PostgreSQL Installation
 
 The `pgscript.sh` file contains a comprehensive script for installing and configuring PostgreSQL with custom options. Key features include:
