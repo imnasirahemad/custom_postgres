@@ -6,17 +6,21 @@ services:
     container_name: custom-postgresql
     volumes:
       - ./scripts:/scripts
-      - postgres-data:/home/postgres/pgsql/data
+      - postgres-data:/var/lib/postgresql/data
     environment:
       - DEBIAN_FRONTEND=noninteractive
     command: >
       bash -c "
         apt-get update && 
-        apt-get install -y curl gcc python3 liblz4-dev libssl-dev sudo &&
-        chmod +x /scripts/pgscript.sh &&
-        /scripts/pgscript.sh install &&
-        su - postgres -c '/home/postgres/pgsql/bin/pg_ctl -D /home/postgres/pgsql/data -l logfile start' &&
-        tail -f /dev/null
+        apt-get install -y curl gcc g++ python3 python3-dev liblz4-dev libssl-dev sudo make pkg-config bzip2 &&
+        export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig &&
+        ldconfig &&
+        useradd -m -s /bin/bash postgres &&
+        chown -R postgres:postgres /scripts /var/lib/postgresql &&
+        su - postgres -c '/scripts/pgscript.sh install' &&
+        su - postgres -c '/var/lib/postgresql/pgsql/bin/pg_ctl -D /var/lib/postgresql/data stop -m fast || true' &&
+        su - postgres -c '/var/lib/postgresql/pgsql/bin/pg_ctl -D /var/lib/postgresql/data -l logfile start' &&
+        sleep infinity
       "
     ports:
       - "5433:5432"

@@ -16,13 +16,15 @@ This guide will walk you through the process of installing and configuring a cus
    ```
 
 2. Review the `docker-compose.yml` file:
-   ```yaml:docker-compose.yml
+   ```yaml
+   docker-compose.yml
    startLine: 1
    endLine: 25
    ```
 
 3. Make sure the `pgscript.sh` is in the `scripts/` directory:
-   ```shell:scripts/pgscript.sh
+   ```shell
+   scripts/pgscript.sh
    startLine: 1
    endLine: 223
    ```

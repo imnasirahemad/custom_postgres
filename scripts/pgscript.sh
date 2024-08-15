@@ -2,10 +2,10 @@
 
 # Configuration variables
 POSTGRES_VERSION="16.3"
-POSTGRES_PREFIX="$HOME/pgsql"
-DATA_DIR="$POSTGRES_PREFIX/data"
+POSTGRES_PREFIX="/var/lib/postgresql/pgsql"
+DATA_DIR="/var/lib/postgresql/data"
 LOGFILE="$POSTGRES_PREFIX/logfile"
-BUILD_DIR="$HOME/postgresql-build"
+BUILD_DIR="/var/lib/postgresql/postgresql-build"
 PYTHON3_PATH=$(which python3)
 
 # Helper functions
@@ -36,7 +36,9 @@ check_prerequisites() {
     command -v python3 >/dev/null 2>&1 || error_exit "Python3 is required but not installed. Please install it using 'sudo apt install python3'."
     
     # 4. lz4: Used for data compression in PostgreSQL
-    command -v lz4 >/dev/null 2>&1 || error_exit "LZ4 is required but not installed. Please install it using 'sudo apt install liblz4-dev'."
+    if ! pkg-config --exists liblz4; then
+        error_exit "LZ4 development library is required but not installed. Please install it using 'sudo apt install liblz4-dev'."
+    fi
     
     # 5. openssl: Required for SSL support in PostgreSQL
     command -v openssl >/dev/null 2>&1 || error_exit "OpenSSL is required but not installed. Please install it using 'sudo apt install libssl-dev'."
@@ -53,7 +55,7 @@ ensure_install_directory() {
 create_postgres_user() {
     if ! id -u postgres >/dev/null 2>&1; then
         echo "Creating 'postgres' user..."
-        sudo useradd -m -s /bin/bash postgres || error_exit "Failed to create 'postgres' user."
+        useradd -m -s /bin/bash postgres || error_exit "Failed to create 'postgres' user."
     else
         echo "'postgres' user already exists."
     fi
@@ -83,8 +85,15 @@ download_postgresql() {
 
 configure_postgresql() {
     echo "Configuring PostgreSQL with custom options..."
-    PYTHON_INCLUDE_DIR=$($PYTHON3_PATH -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())")
-    PYTHON_LIB_DIR=$($PYTHON3_PATH -c "from distutils.sysconfig import get_config_var; print(get_config_var('LIBDIR'))")
+    PYTHON_INCLUDE_DIR=$(python3-config --includes 2>/dev/null | sed 's/-I//g' | awk '{print $1}')
+    PYTHON_LIB_DIR=$(python3-config --ldflags 2>/dev/null | sed 's/-L//g' | awk '{print $1}')
+
+    if [ -z "$PYTHON_INCLUDE_DIR" ]; then
+        PYTHON_INCLUDE_DIR="/usr/include/python3.10"
+    fi
+    if [ -z "$PYTHON_LIB_DIR" ]; then
+        PYTHON_LIB_DIR="/usr/lib"
+    fi
 
     export LDFLAGS="-L/usr/lib/x86_64-linux-gnu -L$PYTHON_LIB_DIR"
     export CPPFLAGS="-I/usr/include -I$PYTHON_INCLUDE_DIR"
@@ -96,6 +105,8 @@ configure_postgresql() {
         --with-ssl=openssl \
         --with-lz4 \
         --with-python \
+        --without-icu \
+        --without-readline \
         --with-includes=\"/usr/include $PYTHON_INCLUDE_DIR\" \
         --with-libraries=\"/usr/lib/x86_64-linux-gnu $PYTHON_LIB_DIR\""
     echo "Configuration command: $config_command"
@@ -131,30 +142,32 @@ setup_environment() {
 initialize_database() {
     echo "Initializing the PostgreSQL database..."
     mkdir -p "$DATA_DIR" || error_exit "Failed to create data directory."
-    sudo -u postgres "$POSTGRES_PREFIX/bin/initdb" -D "$DATA_DIR" --username=postgres || error_exit "Database initialization failed."
+    "$POSTGRES_PREFIX/bin/initdb" -D "$DATA_DIR" --username=postgres || error_exit "Database initialization failed."
     
     # Start PostgreSQL temporarily to make changes
-    sudo -u postgres "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" -l "$LOGFILE" -w start
+    "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" -l "$LOGFILE" -w start
 
     # Create a new database
-    sudo -u postgres "$POSTGRES_PREFIX/bin/createdb" mydb
+    "$POSTGRES_PREFIX/bin/createdb" mydb
 
     # Set password for postgres user
-    sudo -u postgres "$POSTGRES_PREFIX/bin/psql" -c "ALTER USER postgres WITH PASSWORD 'PswdPost123';"
+    "$POSTGRES_PREFIX/bin/psql" -c "ALTER USER postgres WITH PASSWORD 'PswdPost123';"
 
     # Configure PostgreSQL to allow external connections
-    echo "host all all 0.0.0.0/0 md5" | sudo tee -a "$DATA_DIR/pg_hba.conf"
-    sudo -u postgres "$POSTGRES_PREFIX/bin/psql" -c "ALTER SYSTEM SET listen_addresses TO '*';"
+    echo "host all all 0.0.0.0/0 md5" | tee -a "$DATA_DIR/pg_hba.conf"
+    "$POSTGRES_PREFIX/bin/psql" -c "ALTER SYSTEM SET listen_addresses TO '*';"
 
     # Restart PostgreSQL to apply changes
-    sudo -u postgres "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" -l "$LOGFILE" restart
+    "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" -l "$LOGFILE" restart
 }
 
 start_postgresql() {
     echo "Starting PostgreSQL..."
-    sudo -u postgres "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" -l "$LOGFILE" -w start
+    "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" -l "$LOGFILE" stop -m fast || true
+    sleep 2
+    "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" -l "$LOGFILE" -w start
     sleep 5  # Give the server a moment to start up
-    if ! sudo -u postgres "$POSTGRES_PREFIX/bin/pg_isready" -q; then
+    if ! "$POSTGRES_PREFIX/bin/pg_isready" -q; then
         check_log_file
         error_exit "Failed to start PostgreSQL."
     fi
@@ -172,18 +185,18 @@ check_log_file() {
 
 verify_custom_options() {
     echo "Verifying custom build options..."
-    sudo -u postgres "$POSTGRES_PREFIX/bin/psql" -d postgres -c "SHOW block_size;" || warning_message "Failed to verify block size."
-    sudo -u postgres "$POSTGRES_PREFIX/bin/psql" -d postgres -c "SHOW segment_size;" || warning_message "Failed to verify segment size."
+    "$POSTGRES_PREFIX/bin/psql" -d postgres -c "SHOW block_size;" || warning_message "Failed to verify block size."
+    "$POSTGRES_PREFIX/bin/psql" -d postgres -c "SHOW segment_size;" || warning_message "Failed to verify segment size."
     echo "Checking PostgreSQL version and compile-time options:"
-    sudo -u postgres "$POSTGRES_PREFIX/bin/postgres" -V
-    sudo -u postgres "$POSTGRES_PREFIX/bin/pg_config" --configure
+    "$POSTGRES_PREFIX/bin/postgres" -V
+    "$POSTGRES_PREFIX/bin/pg_config" --configure
 }
 
 # Maintenance functions
 stop_postgresql() {
     echo "Stopping PostgreSQL..."
     if command -v "$POSTGRES_PREFIX/bin/pg_ctl" &> /dev/null; then
-        sudo -u postgres "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" stop -m fast || warning_message "Failed to stop PostgreSQL."
+        "$POSTGRES_PREFIX/bin/pg_ctl" -D "$DATA_DIR" stop -m fast || warning_message "Failed to stop PostgreSQL."
     else
         echo "pg_ctl command not found; assuming PostgreSQL is not running."
     fi
