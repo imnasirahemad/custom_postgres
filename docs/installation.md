@@ -56,7 +56,8 @@ This guide will walk you through the process of installing and configuring a cus
 
 ## Maintenance
 
-To stop the PostgreSQL server:```
+To stop the PostgreSQL server:
+```
 docker compose stop custom-postgresql
 ```
 
