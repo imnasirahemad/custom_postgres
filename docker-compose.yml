@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  postgresql:
+    image: ubuntu:24.04
+    container_name: custom-postgresql
+    volumes:
+      - ./scripts:/scripts
+      - postgres-data:/home/postgres/pgsql/data
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+    command: >
+      bash -c "
+        apt-get update && 
+        apt-get install -y curl gcc python3 liblz4-dev libssl-dev sudo &&
+        chmod +x /scripts/pgscript.sh &&
+        /scripts/pgscript.sh install &&
+        su - postgres -c '/home/postgres/pgsql/bin/pg_ctl -D /home/postgres/pgsql/data -l logfile start' &&
+        tail -f /dev/null
+      "
+    ports:
+      - "5433:5432"
+
+volumes:
+  postgres-data:
